@@ -6,6 +6,23 @@ T-eraClip is a local-first Chrome Extension for collecting and exporting 1Office
 
 Collection requests and exported task links retain the source origin, including its port. Project inventories cannot mix origins. Access-history collection and personnel refresh remain pinned to the same environment. No persistent host permissions are added. The No. write experiment remains restricted to the existing allowlisted project/tasks on the production origin; adding test-site reading does not enable test-site writes. After rebuilding, reload the unpacked extension and invoke it again from the intended source tab to grant `activeTab` access. Automated checks use fixtures/mocks, not live-server compatibility guarantees.
 
+## Cài Cho Người Dùng (Windows / macOS)
+
+**Không cần cài Node.js, npm, Git hoặc chạy lệnh.** Người phụ trách build một lần, rồi gửi bản cài đã đóng gói cho người dùng.
+
+1. Nhận file `T-eraClip-Thao-luan-Noi-bo.zip` từ người phụ trách. Đây là bản **chỉ thu thập thảo luận**, không có Capture hoặc công cụ thay đổi mã/No.
+2. Giải nén ZIP vào nơi cố định, ví dụ `Documents/T-eraClip`. Windows: nhấp chuột phải file ZIP, chọn **Extract All / Giải nén tất cả**.
+3. Mở Chrome, nhập `chrome://extensions` vào thanh địa chỉ.
+4. Bật **Developer mode / Chế độ dành cho nhà phát triển** và giữ chế độ này bật khi dùng bản unpacked.
+5. Bấm **Load unpacked / Tải tiện ích đã giải nén**, chọn thư mục `T-eraClip-Thao-luan` có file `manifest.json` ngay bên trong.
+6. Ghim tiện ích, đăng nhập 1Office bằng tài khoản của mình và bắt đầu thu thập thảo luận.
+
+Không chọn file ZIP, không chọn thư mục mã nguồn GitHub, không mở file HTML để cài. **Code > Download ZIP trên GitHub là mã nguồn, không phải bản cài đã build.** Không xóa/di chuyển thư mục đã nạp. Bản này không tự cập nhật; nhận bản mới, thay file trong cùng thư mục rồi bấm Reload trên thẻ tiện ích.
+
+Nếu máy công ty chặn Developer mode hoặc Load unpacked, liên hệ CNTT, không vượt chính sách. Cài unpacked không giới hạn được người sử dụng theo danh sách chỉ định: ai có gói cài đều có thể sao chép; quyền xem dữ liệu vẫn do tài khoản 1Office quyết định.
+
+Xem [hướng dẫn cài bản thảo luận](docs/INSTALL_DISCUSSIONS.md). Đây là bản pilot, chưa được Google xét duyệt và chưa xác minh trực tiếp trên máy Windows của key user. Quy trình nạp unpacked tham khảo [Chrome Developers](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked).
+
 ## MVP Status
 
 The current working version is `0.1.0`, intended for internal pilot testing. It is not published to or approved by the Chrome Web Store. The earlier local MVP has since been extended with 1Office collection and export.
@@ -78,7 +95,9 @@ src/shared/types.ts             Shared data types
 docs/                           Product, architecture, and release documents
 ```
 
-## Setup
+## Developer Setup (Not Required For End Users)
+
+This section is only for maintainers building from source. End users receiving a prebuilt package should follow the installation section above instead. These npm commands also apply on Windows with Node.js installed, but recipients do not need to run them.
 
 Requirements:
 
@@ -105,7 +124,7 @@ npm run build
 
 The unpacked extension is generated in `dist/`.
 
-## Load In Chrome
+## Test A Local Developer Build In Chrome
 
 1. Run `npm run build`.
 2. Open `chrome://extensions`.
@@ -117,6 +136,8 @@ The unpacked extension is generated in `dist/`.
 After rebuilding, return to `chrome://extensions` and reload the extension.
 
 ## Internal Distribution
+
+For the discussions-only profile, maintainers run `npm run build:discussions` and `node scripts/package-discussions.mjs`. Send the generated `T-eraClip-Thao-luan/` folder (zipped for transport) and [installation guide](docs/INSTALL_DISCUSSIONS.md), not the source repository. The generated Store ZIP can also be extracted and loaded by selecting the folder containing its root `manifest.json`; its filename does not mean it has been approved or published by Google.
 
 After validation and build, run `node scripts/package-release.mjs` to create a dated pilot ZIP, Chrome Web Store ZIP, file inventory and SHA-256 checksums under ignored `releases/`.
 
