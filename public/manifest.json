@@ -1,12 +1,22 @@
 {
   "name": "T-eraClip",
-  "description": "Clip anything. Turn it into action.",
+  "description": "Thu thập, xuất thảo luận 1Office ra Excel và lưu nội dung công việc trên máy bằng Capture.",
   "version": "0.1.0",
   "manifest_version": 3,
   "permissions": ["storage", "contextMenus", "activeTab", "scripting"],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "T-eraClip"
+    "default_title": "T-eraClip",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
   },
   "options_page": "options.html",
   "background": {

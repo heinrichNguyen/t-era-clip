@@ -23,6 +23,7 @@ export interface OneOfficeCollectorOptions {
   noProgressTimeoutMs: number;
   progressMessageType: string;
   settleTimeMs: number;
+  collectionId?: string;
 }
 
 export async function collectOneOfficeDiscussionFromPage(
@@ -100,6 +101,7 @@ export async function collectOneOfficeDiscussionFromPage(
     try {
       const result = extensionApi?.runtime?.sendMessage?.({
         type: options.progressMessageType,
+        collectionId: options.collectionId,
         progress,
       });
 

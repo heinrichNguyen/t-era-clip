@@ -14,6 +14,13 @@ interface GanttTask {
   phase_id?: unknown;
   title?: unknown;
   code?: unknown;
+  start_plan?: unknown;
+  end_plan?: unknown;
+  start?: unknown;
+  end?: unknown;
+  status?: unknown;
+  out_date?: unknown;
+  fields?: unknown;
 }
 
 interface GanttPhase {
@@ -30,6 +37,10 @@ interface GanttEnrichmentResponse {
   enriched?: unknown;
 }
 
+interface UserLookupResponse {
+  items?: unknown;
+}
+
 export async function collectOneOfficeProjectInventoryFromApi(
   options: OneOfficeProjectInventoryApiOptions,
 ): Promise<OneOfficeProjectInventory> {
@@ -38,7 +49,7 @@ export async function collectOneOfficeProjectInventoryFromApi(
   const sourceUrl = options.sourceUrl ?? window.location.href;
   const parsedUrl = new URL(sourceUrl);
 
-  if (parsedUrl.origin !== options.allowedOrigin) {
+  if (window.location.origin !== options.allowedOrigin || parsedUrl.origin !== options.allowedOrigin) {
     throw new Error('This tab is not on the approved 1Office origin.');
   }
 
@@ -56,6 +67,139 @@ export async function collectOneOfficeProjectInventoryFromApi(
       .replace(/\u00a0/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+
+  const decodeHtml = (value: string): string => {
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = value;
+    return textarea.value;
+  };
+
+  const readElementProps = (value: unknown): Record<string, unknown> | null => {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const match = /data-props=(['"])([\s\S]*?)\1/.exec(value);
+    if (!match) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(decodeHtml(match[2]));
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const stripMarkup = (value: unknown): string => {
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      return '';
+    }
+
+    const container = document.createElement('div');
+    container.innerHTML = decodeHtml(String(value))
+      .replace(/<br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/(?:div|li|p)>/gi, '\n');
+    return normalizeText(container.textContent);
+  };
+
+  const uniqueValues = (values: string[]): string[] =>
+    Array.from(new Set(values.map(normalizeText).filter(Boolean)));
+
+  const collectNamedValues = (value: unknown): string[] => {
+    const names: string[] = [];
+    const visit = (candidate: unknown): void => {
+      if (Array.isArray(candidate)) {
+        candidate.forEach(visit);
+        return;
+      }
+      if (!candidate || typeof candidate !== 'object') {
+        return;
+      }
+
+      const record = candidate as Record<string, unknown>;
+      for (const key of ['name', 'label', 'title']) {
+        const namedValue = normalizeText(record[key]);
+        if (namedValue) {
+          names.push(namedValue);
+        }
+      }
+      for (const key of ['user', 'users', 'items', 'values']) {
+        visit(record[key]);
+      }
+    };
+
+    visit(readElementProps(value));
+    return uniqueValues(names);
+  };
+
+  const readUserIds = (value: unknown): string[] => {
+    const ids: string[] = [];
+    const visit = (candidate: unknown): void => {
+      if (Array.isArray(candidate)) {
+        candidate.forEach(visit);
+        return;
+      }
+      if (typeof candidate === 'string' || typeof candidate === 'number') {
+        String(candidate).split(',').forEach((part) => {
+          const id = part.trim();
+          if (/^\d+$/.test(id)) {
+            ids.push(id);
+          }
+        });
+        return;
+      }
+      if (!candidate || typeof candidate !== 'object') {
+        return;
+      }
+
+      const record = candidate as Record<string, unknown>;
+      visit(record.ID);
+      visit(record.id);
+      for (const key of ['user', 'users', 'items', 'values', 'ids', 'value']) {
+        visit(record[key]);
+      }
+    };
+
+    visit(readElementProps(value));
+    return uniqueValues(ids);
+  };
+
+  const readDisplayValues = (value: unknown): string[] => {
+    const namedValues = collectNamedValues(value);
+    if (namedValues.length > 0) {
+      return namedValues;
+    }
+
+    const props = readElementProps(value);
+    const content = props?.content;
+    const renderedContent = stripMarkup(content);
+    if (renderedContent && !/^\d+(?:\s*[,;]\s*\d+)*$/.test(renderedContent)) {
+      return uniqueValues(renderedContent.split(/\s*[;\n]+\s*/));
+    }
+
+    const renderedValue = stripMarkup(value);
+    return renderedValue && renderedValue !== '…'
+      ? uniqueValues(renderedValue.split(/\s*[;\n]+\s*/))
+      : [];
+  };
+
+  const readFieldRecord = (value: unknown): Record<string, unknown> =>
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+
+  const readFieldText = (fields: Record<string, unknown>, key: string): string => {
+    const value = fields[key];
+    const namedValues = collectNamedValues(value);
+    if (namedValues.length > 0) {
+      return namedValues.join('; ');
+    }
+    return stripMarkup(value);
+  };
 
   const readExpectedTaskCount = (): number | null => {
     const normalizeLabel = (value: string): string =>
@@ -84,20 +228,32 @@ export async function collectOneOfficeProjectInventoryFromApi(
   };
 
   const fetchJson = async (url: string, init?: RequestInit): Promise<unknown> => {
-    const response = await fetch(url, {
-      credentials: 'include',
-      ...init,
-      headers: {
-        'X-Requested-With': 'XMLHttpRequest',
-        ...(init?.headers ?? {}),
-      },
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    try {
+      const response = await fetch(url, {
+        credentials: 'include',
+        ...init,
+        redirect: 'error',
+        signal: controller.signal,
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          ...(init?.headers ?? {}),
+        },
+      });
 
-    if (!response.ok) {
-      throw new Error(`1Office returned HTTP ${response.status} while loading project tasks.`);
+      if (!response.ok) {
+        throw new Error(`Yêu cầu 1Office: HTTP ${response.status}. Hãy kiểm tra phiên đăng nhập và thử lại.`);
+      }
+      return await response.json();
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Yêu cầu 1Office:')) throw error;
+      throw new Error(controller.signal.aborted
+        ? 'Yêu cầu 1Office: máy chủ không phản hồi trong 30 giây. Hãy thử lại.'
+        : 'Yêu cầu 1Office: lỗi kết nối, dữ liệu trả về hoặc chuyển hướng. Kiểm tra phiên đăng nhập và thử lại.');
+    } finally {
+      clearTimeout(timeout);
     }
-
-    return response.json();
   };
 
   const ganttUrl = new URL('/apps/work-project-project/gantt', parsedUrl.origin);
@@ -138,6 +294,13 @@ export async function collectOneOfficeProjectInventoryFromApi(
       phaseId,
       name: normalizeText(task.title),
       code: normalizeText(task.code) || null,
+      startPlan: normalizeText(task.start_plan),
+      endPlan: normalizeText(task.end_plan),
+      actualStart: normalizeText(task.start),
+      actualEnd: normalizeText(task.end),
+      status: normalizeText(task.status),
+      overdueDays: normalizeText(task.out_date),
+      fields: readFieldRecord(task.fields),
     }];
   });
 
@@ -181,6 +344,7 @@ export async function collectOneOfficeProjectInventoryFromApi(
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown enrichment error.';
+    if (message.startsWith('Yêu cầu 1Office:')) throw error;
     warnings.push(`Could not load all task No. values. ${message}`);
   }
 
@@ -189,6 +353,47 @@ export async function collectOneOfficeProjectInventoryFromApi(
       `Loaded detailed task fields for ${enrichmentByTaskId.size} of ${rawTasks.length} tasks.`,
     );
   }
+
+  const userNameById = new Map<string, string>();
+  const userIds = uniqueValues(Array.from(enrichmentByTaskId.values()).flatMap((record) => {
+    const fields = readFieldRecord(record.fields);
+    return [
+      ...readUserIds(record.assign_names_html),
+      ...readUserIds(record.assign_ids_html),
+      ...readUserIds(fields.assign_ids),
+      ...readUserIds(fields.owner_ids),
+    ];
+  }));
+  const userLookupBatchSize = 100;
+  try {
+    for (let index = 0; index < userIds.length; index += userLookupBatchSize) {
+      const query = new URLSearchParams();
+      userIds.slice(index, index + userLookupBatchSize).forEach((id) => query.append('ids[]', id));
+      const lookupUrl = new URL('/app/autofill/users/items', parsedUrl.origin);
+      lookupUrl.search = query.toString();
+      const response = (await fetchJson(lookupUrl.href)) as UserLookupResponse;
+      if (!Array.isArray(response.items)) {
+        continue;
+      }
+      for (const item of response.items) {
+        const record = readFieldRecord(item);
+        const id = normalizeText(record.ID || record.id);
+        const name = normalizeText(record.name);
+        if (/^\d+$/.test(id) && name) {
+          userNameById.set(id, name);
+        }
+      }
+    }
+  } catch {
+    // Keep the names embedded in the Gantt response when user lookup is unavailable.
+  }
+
+  const readUserNames = (value: unknown): string[] => {
+    const namesById = readUserIds(value)
+      .map((id) => userNameById.get(id) ?? '')
+      .filter(Boolean);
+    return uniqueValues([...namesById, ...collectNamedValues(value)]);
+  };
 
   const tasksById = new Map(rawTasks.map((task) => [task.internalId, task]));
   const childrenByParentId = new Map<string, typeof rawTasks>();
@@ -272,6 +477,14 @@ export async function collectOneOfficeProjectInventoryFromApi(
     return customNo === '…' || customNo === '-' ? '' : customNo;
   };
 
+  const readEnrichment = (taskId: string): {
+    fields: Record<string, unknown>;
+    record: Record<string, unknown>;
+  } => {
+    const record = enrichmentByTaskId.get(taskId) ?? {};
+    return { record, fields: readFieldRecord(record.fields) };
+  };
+
   const chosenNoByTaskId = new Map(
     rawTasks.map((task) => [
       task.internalId,
@@ -280,6 +493,7 @@ export async function collectOneOfficeProjectInventoryFromApi(
   );
   const tasks: OneOfficeProjectTaskInventoryItem[] = orderedTaskIds.map((taskId, sourceOrder) => {
     const task = tasksById.get(taskId)!;
+    const { record: enrichment, fields: enrichedFields } = readEnrichment(taskId);
     const taskNo = chosenNoByTaskId.get(taskId) ?? '';
     const parentNo = task.parentInternalId
       ? chosenNoByTaskId.get(task.parentInternalId) ?? null
@@ -289,16 +503,46 @@ export async function collectOneOfficeProjectInventoryFromApi(
       sourceOrder,
       internalId: task.internalId,
       no: taskNo,
+      sourceNo: Object.prototype.hasOwnProperty.call(enrichedFields, 'cf19') ? readCustomNo(taskId) : undefined,
       code: task.code,
       name: task.name,
       url: `${parsedUrl.origin}/apps/work-task-task/view?ID=${encodeURIComponent(task.internalId)}`,
       depth: (outlineByTaskId.get(task.internalId) ?? taskNo).split('.').filter(Boolean).length,
       parentNo,
       parentInternalId: task.parentInternalId,
+      assigneeNames: readUserNames(
+        enrichment.assign_names_html || enrichment.assign_ids_html || enrichedFields.assign_ids,
+      ),
+      assignerNames: readUserNames(enrichedFields.owner_ids),
+      departmentNames: readDisplayValues(enrichedFields.department_ids),
+      taskStatus:
+        readFieldText(enrichedFields, 'status') ||
+        normalizeText(task.fields.status) ||
+        task.status,
+      baselineStart: readFieldText(enrichedFields, 'cf171'),
+      baselineEnd: readFieldText(enrichedFields, 'cf174'),
+      plannedStart: normalizeText(task.fields.start_plan) || task.startPlan,
+      plannedEnd: normalizeText(task.fields.end_plan) || task.endPlan,
+      actualStart: normalizeText(task.fields.start) || task.actualStart,
+      actualEnd: normalizeText(task.fields.end) || task.actualEnd,
+      overdueDays:
+        readFieldText(enrichedFields, 'out_date') ||
+        normalizeText(task.fields.out_date) ||
+        task.overdueDays,
+      completedOverdueDays: readFieldText(enrichedFields, 'out_date_completed'),
+      labels: readDisplayValues(enrichedFields.tag_ids),
     };
   });
 
   const expectedTaskCount = readExpectedTaskCount();
+  const missingSourceNo = tasks.filter((task) => task.sourceNo === undefined).length;
+  if (missingSourceNo > 0) {
+    warnings.push(`Chưa xác minh được No. gốc của ${missingSourceNo}/${tasks.length} công việc từ nguồn chi tiết. Số thứ tự gợi ý không thay thế No. gốc; chưa đủ dữ liệu để ghi No.`);
+  }
+  const missingCode = tasks.filter((task) => !task.code).length;
+  if (missingCode > 0) {
+    warnings.push(`Chưa đọc được mã công việc của ${missingCode}/${tasks.length} công việc từ nguồn danh sách. Không kết luận mã trên 1Office đang trống.`);
+  }
   if (expectedTaskCount !== null && tasks.length !== expectedTaskCount) {
     warnings.push(`Loaded ${tasks.length} of ${expectedTaskCount} expected project tasks.`);
   }
@@ -310,10 +554,9 @@ export async function collectOneOfficeProjectInventoryFromApi(
   const projectName = normalizeText(
     document.querySelector<HTMLElement>('#header-title')?.textContent,
   );
-  const complete =
-    warnings.length === 0 &&
-    enrichmentByTaskId.size === rawTasks.length &&
-    (expectedTaskCount === null || tasks.length === expectedTaskCount);
+  // Inventory completeness describes whether all project tasks were loaded.
+  // Optional enrichment can warn about missing export fields without blocking collection.
+  const complete = expectedTaskCount === null || tasks.length === expectedTaskCount;
 
   return {
     schemaVersion: 1,

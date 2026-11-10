@@ -3,7 +3,8 @@ import type {
   OneOfficeProjectTaskInventoryItem,
 } from './types';
 import type { OneOfficePageSnapshot } from './collector';
-import { ONEOFFICE_ALLOWED_ORIGIN, parseOneOfficeSnapshot } from './collectionClient';
+import { parseOneOfficeSnapshot } from './collectionClient';
+import { oneOfficeOrigin } from './origins';
 
 export interface OneOfficeFastPathPageProbeOptions {
   allowedOrigin: string;
@@ -21,6 +22,7 @@ export interface OneOfficeFastPathPageProbeResult {
   hasLoadMore: boolean;
   snapshot: OneOfficePageSnapshot | null;
   error: string | null;
+  requestFailed?: boolean;
 }
 
 export interface OneOfficeFastPathProbeResult extends OneOfficeFastPathPageProbeResult {
@@ -49,6 +51,8 @@ export async function probeOneOfficeQuickViewFromPage(
     return { ...baseResult, error: 'The source tab is outside the approved 1Office origin.' };
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
   try {
     const url = new URL('/apps/work-task-task/view', options.allowedOrigin);
     url.searchParams.set('ID', options.taskId);
@@ -57,11 +61,15 @@ export async function probeOneOfficeQuickViewFromPage(
     const response = await fetch(url.href, {
       method: 'GET',
       credentials: 'include',
+      redirect: 'error',
+      signal: controller.signal,
       headers: {
         Accept: 'text/html, */*; q=0.01',
         'X-Requested-With': 'XMLHttpRequest',
       },
     });
+    if (!response.ok) return { ...baseResult, responseStatus: response.status, requestFailed: true,
+      error: `HTTP ${response.status}. Hãy kiểm tra phiên đăng nhập và thử lại.` };
     const body = await response.text();
     const contentType = response.headers.get('content-type') ?? '';
     let responseKind: OneOfficeFastPathPageProbeResult['responseKind'] =
@@ -103,16 +111,14 @@ export async function probeOneOfficeQuickViewFromPage(
       `.cards.comments[comments-id="work-task-task@${options.taskId}"]`,
     );
 
-    if (!response.ok || !discussionRoot) {
+    if (!discussionRoot) {
       return {
         ...baseResult,
         responseStatus: response.status,
         responseKind,
         bodyLength: body.length,
         snapshot: null,
-        error: !response.ok
-          ? `Quickview returned HTTP ${response.status}.`
-          : 'Quickview did not contain the expected task discussion.',
+        error: 'Quickview did not contain the expected task discussion.',
       };
     }
 
@@ -186,11 +192,16 @@ export async function probeOneOfficeQuickViewFromPage(
       },
       error: null,
     };
-  } catch (error) {
+  } catch {
     return {
       ...baseResult,
-      error: error instanceof Error ? error.message : 'Unknown quickview probe error.',
+      requestFailed: true,
+      error: controller.signal.aborted
+        ? 'Máy chủ không phản hồi trong 30 giây. Hãy thử lại.'
+        : 'Lỗi kết nối, dữ liệu trả về hoặc chuyển hướng. Kiểm tra phiên đăng nhập và thử lại.',
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -209,7 +220,7 @@ export async function probeOneOfficeProjectFastPath(
       const injectionResults = await chromeApi.scripting.executeScript({
         target: { tabId },
         func: probeOneOfficeQuickViewFromPage,
-        args: [{ allowedOrigin: ONEOFFICE_ALLOWED_ORIGIN, taskId: task.internalId }],
+        args: [{ allowedOrigin: oneOfficeOrigin(task.url), taskId: task.internalId }],
       });
       const probe = injectionResults?.[0]?.result as
         | OneOfficeFastPathPageProbeResult
@@ -255,6 +266,7 @@ export async function collectOneOfficeTaskFastPath(
   task: OneOfficeProjectTaskInventoryItem,
 ): Promise<OneOfficeDiscussionExport | null> {
   const [probe] = await probeOneOfficeProjectFastPath(tabId, [task]);
+  if (probe?.requestFailed) throw new Error(`Yêu cầu 1Office: ${probe.error}`);
 
   if (!probe?.available || probe.hasLoadMore || !probe.snapshot) {
     return null;

@@ -129,6 +129,7 @@ export function collectOneOfficeProjectInventoryFromPage(
       sourceOrder: rawTasks.length,
       internalId,
       no: taskNo,
+      sourceNo: row.querySelector('.gantt-cf19') ? normalizeText(row.querySelector('.gantt-cf19')?.textContent) : undefined,
       code: taskCode || null,
       name: taskName,
       url: taskUrl.href,

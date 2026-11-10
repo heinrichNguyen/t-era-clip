@@ -12,6 +12,9 @@ export default defineConfig({
         options: resolve(__dirname, 'options.html'),
         review: resolve(__dirname, 'review.html'),
         projectReview: resolve(__dirname, 'project-review.html'),
+        accessReview: resolve(__dirname, 'access-review.html'),
+        noReview: resolve(__dirname, 'no-review.html'),
+        importReview: resolve(__dirname, 'import-review.html'),
         background: resolve(__dirname, 'src/background/index.ts')
       },
       output: {

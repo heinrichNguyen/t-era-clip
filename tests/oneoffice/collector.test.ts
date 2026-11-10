@@ -5,6 +5,7 @@ import {
   ONEOFFICE_PROGRESS_MESSAGE,
 } from '../../src/oneoffice/collector';
 import {
+  isOneOfficeFilteredTaskListUrl,
   isOneOfficeProjectPageUrl,
   isSupportedOneOfficeUrl,
   parseOneOfficeSnapshot,
@@ -37,6 +38,16 @@ describe('1Office URL validation', () => {
     ).toBe(true);
     expect(
       isOneOfficeProjectPageUrl('https://office.meygroup.vn/apps/work-task-task/quickview?ID=830'),
+    ).toBe(false);
+    expect(
+      isOneOfficeFilteredTaskListUrl(
+        'https://office.meygroup.vn/apps/work-task-task/list?@sfilter=%7B%22ors%22%3A%5B%5D%7D',
+      ),
+    ).toBe(true);
+    expect(
+      isOneOfficeFilteredTaskListUrl(
+        'https://office.meygroup.vn/apps/work-task-task/view?ID=1001',
+      ),
     ).toBe(false);
   });
 });

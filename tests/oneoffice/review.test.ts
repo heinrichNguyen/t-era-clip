@@ -83,25 +83,25 @@ describe('1Office XLSX export', () => {
     const workbook = buildOneOfficeWorkbook(validResult);
 
     expect(workbook.map((sheet) => sheet.sheet)).toEqual([
-      'Entity',
-      'Discussion',
-      'Attachments',
+      'Đối tượng',
+      'Thảo luận',
+      'Tệp đính kèm',
     ]);
 
     const discussion = workbook[1].data;
     const attachments = workbook[2].data;
     expect(discussion).toHaveLength(33);
     expect(attachments).toHaveLength(2);
-    expect(discussion[0].map(readCellValue)).toContain('Parent comment ID');
+    expect(discussion[0].map(readCellValue)).toContain('ID bình luận cha');
     expect(discussion[1].map(readCellValue)).toMatchObject({
-      1: 'Root comment',
+      1: 'Bình luận gốc',
       2: '1001',
       3: '',
       10: 'Dòng một\nDòng hai',
       12: 1,
     });
     expect(discussion[2].map(readCellValue)).toMatchObject({
-      1: 'Reply',
+      1: 'Phản hồi',
       2: '2001',
       3: '1001',
       11: 'Người dùng A',
@@ -124,9 +124,9 @@ describe('1Office XLSX export', () => {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
     expect([...signature]).toEqual([0x50, 0x4b, 0x03, 0x04]);
-    expect(workbookXml).toContain('name="Entity"');
-    expect(workbookXml).toContain('name="Discussion"');
-    expect(workbookXml).toContain('name="Attachments"');
+    expect(workbookXml).toContain('name="Đối tượng"');
+    expect(workbookXml).toContain('name="Thảo luận"');
+    expect(workbookXml).toContain('name="Tệp đính kèm"');
     expect(files['xl/worksheets/sheet2.xml']).toBeDefined();
   });
 

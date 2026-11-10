@@ -10,6 +10,8 @@ import {
 import { getOneOfficeReview } from '../oneoffice/reviewSession';
 import type { OneOfficeComment, OneOfficeDiscussionExport } from '../oneoffice/types';
 import { TadtLogo } from '../shared/TadtLogo';
+import { useTemporaryData } from '../oneoffice/temporaryData';
+import { ClearTemporaryDataButton, TemporaryDataCleared } from '../shared/TemporaryDataControls';
 
 const DUPLICATE_DIAGNOSTIC_PATTERN = /^Ignored \d+ duplicate comment ID\(s\)/;
 type ExportFormat = 'json' | 'xlsx';
@@ -42,10 +44,14 @@ export function ReviewApp() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [incompleteAcknowledged, setIncompleteAcknowledged] = useState(false);
   const [downloadFeedback, setDownloadFeedback] = useState('');
+  const temporary = useTemporaryData(() => {
+    setResult(null); setIsConfirming(false); setDownloadFeedback(''); setErrorMessage('');
+  });
 
   useEffect(() => {
     void getOneOfficeReview()
       .then((reviewResult) => {
+        if (temporary.clearedRef.current) return;
         if (!reviewResult) {
           setErrorMessage('Không có dữ liệu xem trước 1Office. Hãy thu thập lại thảo luận.');
           return;
@@ -79,7 +85,7 @@ export function ReviewApp() {
   };
 
   const handleDownload = async () => {
-    if (!result || (!result.collection.complete && !incompleteAcknowledged)) {
+    if (temporary.clearedRef.current || !result || (!result.collection.complete && !incompleteAcknowledged)) {
       return;
     }
 
@@ -98,6 +104,7 @@ export function ReviewApp() {
     }
   };
 
+  if (temporary.cleared) return <TemporaryDataCleared />;
   if (isLoading) {
     return <main className="mx-auto max-w-5xl p-8 text-sm text-slate-600">Đang tải bản xem trước...</main>;
   }
@@ -108,6 +115,7 @@ export function ReviewApp() {
         <section className="rounded-2xl border border-red-200 bg-red-50 p-6">
           <h1 className="text-xl font-semibold text-red-800">Không thể mở bản xem trước</h1>
           <p className="mt-3 text-sm leading-6 text-red-700">{errorMessage}</p>
+          <ClearTemporaryDataButton onClick={() => void temporary.clearTemporaryData()} disabled={temporary.clearing} error={temporary.clearError} />
         </section>
       </main>
     );
@@ -122,6 +130,7 @@ export function ReviewApp() {
 
   return (
     <main className="mx-auto max-w-5xl p-6 sm:p-8">
+      <ClearTemporaryDataButton onClick={() => void temporary.clearTemporaryData()} disabled={temporary.clearing || isDownloading} error={temporary.clearError} />
       <header className="overflow-hidden rounded-3xl bg-gradient-to-br from-blue-900 via-indigo-800 to-violet-700 p-6 text-white shadow-xl shadow-blue-900/15">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">

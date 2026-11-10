@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+dist-discussions/
 build/
 
 # Environment files
@@ -28,3 +29,5 @@ Thumbs.db
 *.tmp
 *.log
 releases/
+deliverables/
+tmp/

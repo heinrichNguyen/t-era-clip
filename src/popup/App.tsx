@@ -1,14 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   collectOneOfficeDiscussion,
+  collectOneOfficeFilteredTaskInventory,
   collectOneOfficeProjectInventory,
   getActiveTab,
+  isOneOfficeFilteredTaskListUrl,
   isOneOfficeProjectPageUrl,
+  isOneOfficeReportPageUrl,
   isSupportedOneOfficeUrl,
-  subscribeToOneOfficeProgress,
   type ActiveTab
 } from '../oneoffice/collectionClient';
 import type { OneOfficeCollectionProgress } from '../oneoffice/collector';
+import { useTemporaryData } from '../oneoffice/temporaryData';
 import { openOneOfficeReview } from '../oneoffice/reviewSession';
 import { openOneOfficeProjectBatchReview } from '../oneoffice/projectBatchSession';
 import type {
@@ -21,7 +24,7 @@ import {
   generateFollowUpList,
   generateWaitingList
 } from '../shared/reportGenerator';
-import { getItems, updateItem } from '../shared/storage';
+import { clearItems, getItems, updateItem } from '../shared/storage';
 import {
   generateInternalFollowUpTemplate,
   generateLeadershipSummaryTemplate,
@@ -30,6 +33,10 @@ import {
 } from '../shared/templateGenerator';
 import type { TeraClipItem, TeraClipPriority, TeraClipStatus } from '../shared/types';
 import { TadtLogo } from '../shared/TadtLogo';
+import { isAccessHistoryUrl, openAccessReview } from '../oneoffice/accessHistory';
+import { ProjectImportLauncher } from '../shared/ProjectImportLauncher';
+import { ProjectDiscussionFlow } from './ProjectDiscussionFlow';
+import { collectOneOfficeReportInventory } from '../oneoffice/reportTaskInventory';
 
 const STATUS_OPTIONS: TeraClipStatus[] = ['inbox', 'todo', 'doing', 'waiting', 'done', 'archived'];
 const PRIORITY_OPTIONS: TeraClipPriority[] = ['low', 'medium', 'high', 'urgent'];
@@ -156,6 +163,10 @@ export function PopupApp() {
   const [templateText, setTemplateText] = useState('');
   const [templateFeedback, setTemplateFeedback] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [isResettingCapture, setIsResettingCapture] = useState(false);
+  const [showCaptureResetConfirmation, setShowCaptureResetConfirmation] = useState(false);
+  const [captureResetFeedback, setCaptureResetFeedback] = useState('');
+  const [captureResetError, setCaptureResetError] = useState('');
   const [updatingItemIds, setUpdatingItemIds] = useState<Set<string>>(new Set());
   const [errorMessage, setErrorMessage] = useState('');
   const [updateErrorMessage, setUpdateErrorMessage] = useState('');
@@ -334,6 +345,37 @@ export function PopupApp() {
     setReportFeedback('');
   };
 
+  const handleResetCapture = async () => {
+    if (isLoading || isResettingCapture || updatingItemIds.size > 0) {
+      return;
+    }
+
+    setIsResettingCapture(true);
+    setCaptureResetFeedback('');
+    setCaptureResetError('');
+
+    try {
+      await clearItems();
+      setItems([]);
+      setItemDrafts({});
+      setStatusFilter('all');
+      setPriorityFilter('all');
+      setValidationErrors({});
+      setErrorMessage('');
+      setUpdateErrorMessage('');
+      setReportText('');
+      setReportFeedback('');
+      setTemplateText('');
+      setTemplateFeedback('');
+      setShowCaptureResetConfirmation(false);
+      setCaptureResetFeedback('Đã xóa toàn bộ danh sách Capture.');
+    } catch (error) {
+      setCaptureResetError(`Không thể reset danh sách. ${getErrorMessage(error)}`);
+    } finally {
+      setIsResettingCapture(false);
+    }
+  };
+
   const handleCopyReport = async () => {
     if (!reportText) {
       return;
@@ -366,17 +408,22 @@ export function PopupApp() {
   };
 
   const handleCollectOneOffice = async () => {
-    if (!oneOfficeTab || isCollectingOneOffice) {
+    if (!oneOfficeTab || isCollectingOneOffice || isCollectingProjectInventory || isOpeningProjectReview) {
       return;
     }
 
     setIsCollectingOneOffice(true);
+    temporary.reset();
+    const revision = temporary.revisionRef.current;
     setOneOfficeProgress(null);
     setOneOfficeResult(null);
     setOneOfficeError('');
 
     try {
-      const result = await collectOneOfficeDiscussion(oneOfficeTab.id);
+      const result = await collectOneOfficeDiscussion(oneOfficeTab.id, (progress) => {
+        if (revision === temporary.revisionRef.current) setOneOfficeProgress(progress);
+      }, new URL(oneOfficeTab.url).origin);
+      if (revision !== temporary.revisionRef.current) return;
       setOneOfficeResult(result);
     } catch (error) {
       setOneOfficeError(getOneOfficeErrorMessage(error));
@@ -401,27 +448,40 @@ export function PopupApp() {
     }
   };
 
-  const handleCollectProjectInventory = async () => {
-    if (!oneOfficeTab || isCollectingProjectInventory) {
+  const handleCollectProjectInventory = async (openDiscussions = false) => {
+    if (!oneOfficeTab || isCollectingProjectInventory || isCollectingOneOffice || isOpeningProjectReview) {
       return;
     }
 
     setIsCollectingProjectInventory(true);
+    temporary.reset();
+    const revision = temporary.revisionRef.current;
     setProjectInventory(null);
     setOneOfficeError('');
 
     try {
-      const inventory = await collectOneOfficeProjectInventory(oneOfficeTab.id);
+      const inventory = isOneOfficeReportPageUrl(oneOfficeTab.url)
+        ? await collectOneOfficeReportInventory(oneOfficeTab.id, new URL(oneOfficeTab.url).origin, oneOfficeTab.url)
+        : isOneOfficeFilteredTaskListUrl(oneOfficeTab.url)
+        ? await collectOneOfficeFilteredTaskInventory(oneOfficeTab.id, new URL(oneOfficeTab.url).origin)
+        : await collectOneOfficeProjectInventory(oneOfficeTab.id, new URL(oneOfficeTab.url).origin);
+      if (revision !== temporary.revisionRef.current) return;
       setProjectInventory(inventory);
+      // Only a complete inventory can proceed without a second, explicit action.
+      if (openDiscussions && inventory.collection.complete && inventory.tasks.length > 0) {
+        setIsOpeningProjectReview(true);
+        await openOneOfficeProjectBatchReview(oneOfficeTab, inventory);
+      }
     } catch (error) {
-      setOneOfficeError(getOneOfficeErrorMessage(error));
+      if (revision === temporary.revisionRef.current) setOneOfficeError(getOneOfficeErrorMessage(error));
+      setIsOpeningProjectReview(false);
     } finally {
       setIsCollectingProjectInventory(false);
     }
   };
 
   const handleOpenProjectReview = async () => {
-    if (!oneOfficeTab || !projectInventory || isOpeningProjectReview) {
+    if (!oneOfficeTab || !projectInventory?.tasks.length || isOpeningProjectReview || isCollectingProjectInventory || isCollectingOneOffice) {
       return;
     }
 
@@ -460,11 +520,9 @@ export function PopupApp() {
     };
   }, []);
 
-  useEffect(
-    () => subscribeToOneOfficeProgress((progress) => setOneOfficeProgress(progress)),
-    []
-  );
-
+  const temporary = useTemporaryData(() => {
+    setOneOfficeResult(null); setOneOfficeProgress(null); setProjectInventory(null);
+  });
   const isFiltering = statusFilter !== 'all' || priorityFilter !== 'all';
   const filteredItems = items.filter((item) => {
     const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
@@ -486,9 +544,16 @@ export function PopupApp() {
   const isOneOfficeProjectPage = oneOfficeTab
     ? isOneOfficeProjectPageUrl(oneOfficeTab.url)
     : false;
+  const isOneOfficeFilteredTaskList = oneOfficeTab
+    ? isOneOfficeFilteredTaskListUrl(oneOfficeTab.url)
+    : false;
+  const isOneOfficeReportPage = oneOfficeTab ? isOneOfficeReportPageUrl(oneOfficeTab.url) : false;
   const inventoryMaxDepth = projectInventory
     ? Math.max(...projectInventory.tasks.map((task) => task.depth), 0)
     : 0;
+  const canOpenProjectReview = (projectInventory?.tasks.length ?? 0) > 0;
+  const projectInventoryWarnings = projectInventory?.collection.warnings ?? [];
+  const visibleProjectInventoryWarnings = projectInventoryWarnings.slice(0, 3);
 
   if (activeView === 'main') {
     return (
@@ -511,21 +576,39 @@ export function PopupApp() {
             <h2 className="mt-2 truncate text-lg font-semibold" title={oneOfficeTab?.title}>
               {oneOfficeResult?.entity.name || oneOfficeTab?.title || 'Chưa nhận diện trang hỗ trợ'}
             </h2>
+            {oneOfficeTab && <p className="mt-2 break-all text-xs text-slate-500">Môi trường: {new URL(oneOfficeTab.url).host}</p>}
             <p className="mt-2 text-xs leading-5 text-blue-100">
-              Thu thập nhanh trang đang mở hoặc toàn bộ công việc trong dự án.
+              Thu thập trang đang mở, toàn bộ dự án hoặc danh sách công việc trong báo cáo đã lọc.
             </p>
 
             {oneOfficeTab ? (
               <div className="mt-4 grid gap-2">
-                <button
-                  className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-blue-800 shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={isCollectingOneOffice}
-                  onClick={() => void handleCollectOneOffice()}
-                  type="button"
-                >
-                  {isCollectingOneOffice ? 'Đang thu thập...' : 'Thu thập thảo luận trang hiện tại'}
-                </button>
-                {isOneOfficeProjectPage && (
+                {isAccessHistoryUrl(oneOfficeTab.url) && <button
+                  className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-blue-800"
+                  onClick={() => void openAccessReview(oneOfficeTab.id, new URL(oneOfficeTab.url).origin).catch(() => setOneOfficeError('Không thể mở trang báo cáo lịch sử truy cập.'))}
+                  type="button">Báo cáo lịch sử truy cập</button>}
+                {!isOneOfficeProjectPage && !isOneOfficeFilteredTaskList && !isOneOfficeReportPage && !isAccessHistoryUrl(oneOfficeTab.url) && (
+                  <button
+                    className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-blue-800 shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isCollectingOneOffice}
+                    onClick={() => void handleCollectOneOffice()}
+                    type="button"
+                  >
+                    {isCollectingOneOffice ? 'Đang thu thập...' : 'Thu thập thảo luận trang hiện tại'}
+                  </button>
+                )}
+                {isOneOfficeProjectPage && <ProjectDiscussionFlow inventory={projectInventory} checking={isCollectingProjectInventory} opening={isOpeningProjectReview} disabled={isCollectingOneOffice}
+                  onCollect={() => { if (projectInventory?.tasks.length) void handleOpenProjectReview(); else void handleCollectProjectInventory(true); }}
+                  onCheckOnly={() => void handleCollectProjectInventory()} onCollectPage={() => void handleCollectOneOffice()} />}
+                {isOneOfficeReportPage && <>
+                  <button type="button" disabled={isCollectingProjectInventory || isOpeningProjectReview || isCollectingOneOffice}
+                    onClick={() => void handleCollectProjectInventory(true)}
+                    className="rounded-xl bg-white px-4 py-3 text-sm font-bold text-blue-800 disabled:opacity-60">
+                    {isCollectingProjectInventory ? 'Đang đọc danh sách báo cáo...' : 'Thu thập thảo luận danh sách trong báo cáo'}
+                  </button>
+                  <p className="text-xs leading-5 text-blue-100">Dùng danh sách theo phòng ban và thời gian đang lọc. Tiến độ mở ở trang riêng, thu thập bằng request ngầm, không chuyển tab qua từng công việc. Ngày báo cáo không tự lọc ngày bình luận.</p>
+                </>}
+                {isOneOfficeFilteredTaskList && (
                   <button
                     className="rounded-xl border border-white/40 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={isCollectingProjectInventory || isCollectingOneOffice}
@@ -534,7 +617,9 @@ export function PopupApp() {
                   >
                     {isCollectingProjectInventory
                       ? 'Đang kiểm tra danh sách công việc...'
-                      : 'Kiểm tra danh sách công việc dự án'}
+                      : isOneOfficeFilteredTaskList
+                        ? 'Kiểm tra danh sách công việc đang lọc'
+                        : 'Kiểm tra danh sách công việc dự án'}
                   </button>
                 )}
               </div>
@@ -598,27 +683,51 @@ export function PopupApp() {
             </section>
           )}
 
-          {projectInventory && (
+          {projectInventory && !isOneOfficeProjectPage && (
             <section className="mt-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-slate-900">Danh sách công việc dự án</p>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {isOneOfficeReportPage ? 'Danh sách công việc trong báo cáo' : isOneOfficeFilteredTaskList
+                      ? 'Danh sách công việc đang lọc'
+                      : 'Danh sách công việc dự án'}
+                  </p>
                   <p className="mt-1 text-xs text-slate-500">
                     {projectInventory.collection.loadedTaskCount} công việc, tối đa {inventoryMaxDepth} cấp
                   </p>
                 </div>
                 <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${projectInventory.collection.complete ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                  {projectInventory.collection.complete ? 'Đầy đủ' : 'Cần kiểm tra'}
+                  {projectInventory.collection.complete
+                    ? projectInventoryWarnings.length > 0
+                      ? 'Đủ, có cảnh báo'
+                      : 'Đầy đủ'
+                    : 'Thiếu công việc'}
                 </span>
               </div>
               <button
                 className="mt-3 w-full rounded-xl bg-gradient-to-r from-cyan-500 to-blue-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:from-cyan-600 hover:to-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={isOpeningProjectReview || !projectInventory.collection.complete}
+                disabled={isOpeningProjectReview || !canOpenProjectReview}
                 onClick={() => void handleOpenProjectReview()}
                 type="button"
               >
-                {isOpeningProjectReview ? 'Đang mở trang thu thập...' : 'Thu thập toàn bộ thảo luận dự án'}
+                {isOpeningProjectReview
+                  ? 'Đang mở trang thu thập...'
+                  : isOneOfficeFilteredTaskList || isOneOfficeReportPage
+                    ? 'Thu thập thảo luận danh sách này'
+                    : 'Thu thập toàn bộ thảo luận dự án'}
               </button>
+              {visibleProjectInventoryWarnings.length > 0 && (
+                <ul className="mt-2 space-y-1 text-[10px] leading-4 text-amber-700">
+                  {visibleProjectInventoryWarnings.map((warning) => (
+                    <li key={warning}>• {warning}</li>
+                  ))}
+                  {projectInventoryWarnings.length > visibleProjectInventoryWarnings.length && (
+                    <li>
+                      • Còn {projectInventoryWarnings.length - visibleProjectInventoryWarnings.length} cảnh báo khác.
+                    </li>
+                  )}
+                </ul>
+              )}
               <p className="mt-2 text-[10px] leading-4 text-slate-500">
                 Tiến độ và danh sách chi tiết sẽ mở ở một trang riêng.
               </p>
@@ -637,29 +746,33 @@ export function PopupApp() {
             <span className="text-lg text-blue-700">→</span>
           </button>
         </div>
+        <ProjectImportLauncher inventory={!isOneOfficeFilteredTaskList && isOneOfficeProjectPage ? projectInventory : null} sourceTabId={oneOfficeTab?.id} disabled={isCollectingOneOffice || isCollectingProjectInventory} />
       </div>
     );
   }
 
   return (
-    <div className="flex h-[520px] w-96 flex-col overflow-hidden bg-slate-950 text-slate-100">
-      <div className="border-b border-slate-800 p-4">
+    <div className="capture-theme flex h-[570px] w-[400px] flex-col overflow-hidden bg-slate-950 text-slate-100">
+      <div className="capture-header border-b border-slate-800 bg-white p-4">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <button
-              className="text-xs font-medium text-blue-300 hover:text-blue-200"
-              onClick={() => setActiveView('main')}
-              type="button"
-            >
-              ← Quay lại menu chính
-            </button>
-            <h1 className="mt-2 text-2xl font-semibold">Capture</h1>
-            <p className="mt-1 text-sm text-slate-400">Lưu nội dung và chuyển thành đầu việc.</p>
+          <div className="flex min-w-0 items-start gap-3">
+            <TadtLogo className="h-12 w-16 shrink-0 object-contain object-left" />
+            <div className="min-w-0 border-l border-slate-200 pl-3">
+              <button
+                className="text-xs font-medium text-blue-700 hover:text-blue-900"
+                onClick={() => setActiveView('main')}
+                type="button"
+              >
+                ← Menu chính
+              </button>
+              <h1 className="mt-1 text-xl font-bold text-blue-900">Capture</h1>
+              <p className="mt-0.5 text-xs text-slate-500">Lưu nội dung và chuyển thành đầu việc.</p>
+            </div>
           </div>
 
           <button
             className="rounded-md border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isLoading}
+            disabled={isLoading || isResettingCapture}
             onClick={() => {
               void loadItems();
             }}
@@ -720,10 +833,56 @@ export function PopupApp() {
           )}
         </div>
 
-        <p className="mt-2 text-xs text-slate-500">{itemCountLabel}</p>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <p className="text-xs text-slate-500">{itemCountLabel}</p>
+          <button
+            className="text-xs font-medium text-red-700 hover:text-red-900 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isLoading || isResettingCapture || updatingItemIds.size > 0 || items.length === 0}
+            onClick={() => {
+              setCaptureResetFeedback('');
+              setCaptureResetError('');
+              setShowCaptureResetConfirmation(true);
+            }}
+            type="button"
+          >
+            Reset danh sách
+          </button>
+        </div>
+        {showCaptureResetConfirmation && (
+          <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3">
+            <p className="text-xs leading-5 text-red-800">
+              Xóa toàn bộ {items.length} nội dung Capture, kể cả nội dung đang bị bộ lọc ẩn?
+              Thao tác này không thể hoàn tác. Cài đặt và dữ liệu xuất thảo luận 1Office được giữ nguyên.
+            </p>
+            <div className="mt-2 flex justify-end gap-3">
+              <button
+                className="text-xs font-medium text-slate-600 disabled:opacity-50"
+                disabled={isResettingCapture}
+                onClick={() => setShowCaptureResetConfirmation(false)}
+                type="button"
+              >
+                Hủy
+              </button>
+              <button
+                className="rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                disabled={isLoading || isResettingCapture || updatingItemIds.size > 0}
+                onClick={() => { void handleResetCapture(); }}
+                type="button"
+              >
+                {isResettingCapture ? 'Đang xóa...' : 'Xóa toàn bộ'}
+              </button>
+            </div>
+          </div>
+        )}
+        {captureResetFeedback && (
+          <p className="mt-2 text-xs text-emerald-700" role="status">{captureResetFeedback}</p>
+        )}
+        {captureResetError && (
+          <p className="mt-2 text-xs text-red-700" role="alert">{captureResetError}</p>
+        )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <fieldset disabled={isResettingCapture} className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
         {oneOfficeTab && (
           <section className="hidden">
             <div className="flex items-start justify-between gap-3">
@@ -847,7 +1006,7 @@ export function PopupApp() {
 
                 <button
                   className="mt-3 w-full rounded-md bg-cyan-500 px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={isOpeningProjectReview || !projectInventory.collection.complete}
+                  disabled={isOpeningProjectReview || !canOpenProjectReview}
                   onClick={() => {
                     void handleOpenProjectReview();
                   }}
@@ -1161,7 +1320,7 @@ export function PopupApp() {
             })}
           </div>
         )}
-      </div>
+      </fieldset>
     </div>
   );
 }

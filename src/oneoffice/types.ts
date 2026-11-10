@@ -1,4 +1,4 @@
-export type OneOfficeEntityType = 'project' | 'task';
+export type OneOfficeEntityType = 'project' | 'task' | 'report';
 
 export interface OneOfficeEntityContext {
   type: OneOfficeEntityType;
@@ -55,15 +55,37 @@ export interface OneOfficeDiscussionExport {
 }
 
 export interface OneOfficeProjectTaskInventoryItem {
+  collectionKey?: string;
+  identityError?: string;
+  identityWarning?: string;
+  reportLookupUrl?: string;
+  projectInternalId?: string;
+  projectName?: string;
+  parentName?: string;
   sourceOrder: number;
   internalId: string;
   no: string;
+  // Exact cf19 value, including blank. Undefined means it was not verified.
+  sourceNo?: string;
   code: string | null;
   name: string;
   url: string;
   depth: number;
   parentNo: string | null;
   parentInternalId: string | null;
+  assigneeNames?: string[];
+  assignerNames?: string[];
+  departmentNames?: string[];
+  taskStatus?: string;
+  baselineStart?: string;
+  baselineEnd?: string;
+  plannedStart?: string;
+  plannedEnd?: string;
+  actualStart?: string;
+  actualEnd?: string;
+  overdueDays?: string;
+  completedOverdueDays?: string;
+  labels?: string[];
 }
 
 export interface OneOfficeProjectInventoryStatus {
@@ -75,7 +97,7 @@ export interface OneOfficeProjectInventoryStatus {
 
 export interface OneOfficeProjectInventory {
   schemaVersion: 1;
-  source: '1office-project-dom' | '1office-project-api';
+  source: '1office-project-dom' | '1office-project-api' | '1office-report-dom';
   capturedAt: string;
   project: OneOfficeEntityContext;
   collection: OneOfficeProjectInventoryStatus;
@@ -88,6 +110,7 @@ export type OneOfficeProjectTaskCollectionState =
   | 'complete'
   | 'incomplete'
   | 'failed'
+  | 'unresolved'
   | 'cancelled';
 
 export interface OneOfficeProjectTaskCollectionResult {

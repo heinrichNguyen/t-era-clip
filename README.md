@@ -2,16 +2,24 @@
 
 **Clip anything. Turn it into action.**
 
-T-eraClip is a local-first Chrome Extension for capturing selected webpage text as structured work items. Users can organize captured items in the popup, generate copy-ready reports and message templates, and manage local backups from the Options page.
+T-eraClip is a local-first Chrome Extension for collecting and exporting 1Office work discussions and capturing selected webpage text. The current interface is Vietnamese. Supported 1Office origins are `https://office.meygroup.vn`, `https://testoffice.meygroup.vn`, and `https://testoffice.meygroup.vn:9443` (the observed test deployment).
+
+Collection requests and exported task links retain the source origin, including its port. Project inventories cannot mix origins. Access-history collection and personnel refresh remain pinned to the same environment. No persistent host permissions are added. The No. write experiment remains restricted to the existing allowlisted project/tasks on the production origin; adding test-site reading does not enable test-site writes. After rebuilding, reload the unpacked extension and invoke it again from the intended source tab to grant `activeTab` access. Automated checks use fixtures/mocks, not live-server compatibility guarantees.
 
 ## MVP Status
 
-Version 0.1 is a completed local MVP intended for unpacked Chrome Extension demos and manual testing. It is not published to the Chrome Web Store.
+The current working version is `0.1.0`, intended for internal pilot testing. It is not published to or approved by the Chrome Web Store. The earlier local MVP has since been extended with 1Office collection and export.
 
-The current MVP has passed the full manual regression checklist and includes privacy, typecheck, import-integrity, and stored-data validation hardening.
+Typecheck, automated tests and production build are available. Passing these checks does not establish production readiness, security certification, or compatibility with colleagues' accounts and devices.
 
 ## Features
 
+- Collect discussions on the current supported 1Office page
+- Collect discussions across project tasks and the current filtered task list, including pagination
+- Review collection progress and warnings on a separate page
+- Export original data to Excel/JSON, with work codes, No., hierarchy, comments and replies
+- Retain attachment metadata; original attachment download is not implemented
+- Open the earlier local text-capture tools through the Capture button and return to the main menu
 - Capture selected webpage text from the right-click context menu
 - Preserve the selected text, source URL, source page title, and timestamps
 - Store work items in `chrome.storage.local`
@@ -26,18 +34,20 @@ The current MVP has passed the full manual regression checklist and includes pri
 - Validate and replace local data from a JSON backup
 - Clear all local items and settings with confirmation
 - Safely ignore invalid stored items during reads
+- Reset all Capture items with confirmation, without removing settings or original 1Office data
 
 ## Local-First Data
 
-T-eraClip stores items and settings in the current Chrome profile using `chrome.storage.local`. Version 0.1 has no account, backend, cloud sync, external database, or cross-device synchronization.
+T-eraClip stores Capture items and settings in the current Chrome profile using `chrome.storage.local`. 1Office review/collection sessions use page memory and/or `chrome.storage.session`. There is no T-eraClip account, backend, cloud sync, external database, or cross-device synchronization. 1Office collection uses the user's existing signed-in session on the supported site.
 
 Export important data before clearing extension data, removing the extension, or resetting the browser profile.
 
 ## Privacy And Security
 
 - Capture occurs only after the user selects text and chooses **Save to T-eraClip**.
-- The extension uses only `storage`, `contextMenus`, and `activeTab` permissions.
-- It has no persistent host permissions and injects no content script into webpages.
+- The extension uses `storage`, `contextMenus`, `activeTab`, and `scripting` permissions.
+- It has no persistent host permissions or automatically registered content scripts. User-invoked collectors are injected on the supported 1Office tab, read DOM/API data, and load additional items within the chosen scope.
+- Collection uses the user's 1Office permissions, not the developer's admin privileges.
 - Selected text and item contents are not logged by a webpage content script.
 - Backup imports are validated before confirmation and replacement.
 - Items and settings are written together in one Chrome Storage operation during import.
@@ -106,6 +116,16 @@ The unpacked extension is generated in `dist/`.
 
 After rebuilding, return to `chrome://extensions` and reload the extension.
 
+## Internal Distribution
+
+After validation and build, run `node scripts/package-release.mjs` to create a dated pilot ZIP, Chrome Web Store ZIP, file inventory and SHA-256 checksums under ignored `releases/`.
+
+- [Pilot installation and test checklist](docs/INSTALL_INTERNAL_TEST.md)
+- [Private Chrome Web Store release plan](docs/CHROME_WEB_STORE_RELEASE.md)
+- [Privacy policy draft, requires approval and a hosted URL](docs/PRIVACY_POLICY_DRAFT.md)
+
+The pilot is loaded unpacked. The Store ZIP is only a prepared upload package; publishing requires a registered developer account, truthful privacy disclosures, reviewer test access and Google's approval. Do not send the whole repository or browser profile to testers. Backup Capture before switching from unpacked to Store installation; extension IDs and storage may differ.
+
 ## Basic Usage
 
 1. Select text on a normal webpage.
@@ -142,7 +162,7 @@ Reports and templates use all saved items, not only the currently filtered popup
 - Items cannot be deleted individually.
 - Stored items missing required fields are skipped rather than migrated or repaired.
 - Chrome Storage operations are hardened but are not claimed to provide full database-style ACID transactions.
-- There is no automated test suite; release validation currently uses typecheck, production build, and manual regression testing.
+- Automated tests exist; real-device/account pilot testing is still required before wider distribution.
 
 ## Future Backlog
 
@@ -156,7 +176,7 @@ Potential work after v0.1 stabilization:
 - Evaluate packaging and Chrome Web Store readiness
 - Consider optional synchronization or AI only as separately scoped future products
 
-Cloud sync, backend services, login, analytics, and AI are not part of v0.1.
+Cloud sync, a T-eraClip backend/login, analytics, and AI are not part of the current pilot. The manual AI experiment was removed.
 
 ## Development Principles
 
@@ -167,6 +187,17 @@ Cloud sync, backend services, login, analytics, and AI are not part of v0.1.
 - Prefer small, reviewable changes that preserve existing behavior.
 - Keep build and typecheck commands passing.
 - Treat new features as explicit scope decisions rather than incidental additions.
+
+## Compact Project Discussion Entry
+
+On a project page, the popup's main action checks the task inventory first, then
+opens the existing discussion collection page automatically only when the list is
+complete and nonempty. Partial lists stop for explicit continuation; failures and
+empty lists never launch collection. A check-only action remains under the extra
+options for the code-normalization workflow. Inventory warnings remain available
+in both the popup and collection page. Collectors, request limits, retries, export
+filters and incomplete-export confirmation are unchanged. Filtered-list collection
+keeps its existing separate flow. This reduces clicks, not server request volume.
 
 ## Project Documentation
 

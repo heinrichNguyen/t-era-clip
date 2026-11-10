@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { parseOneOfficeCommentApiResponse } from '../../src/oneoffice/projectCommentApi';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fetchOneOfficeCommentsFromPage, parseOneOfficeCommentApiResponse } from '../../src/oneoffice/projectCommentApi';
 import type { OneOfficeProjectTaskInventoryItem } from '../../src/oneoffice/types';
 
 const task: OneOfficeProjectTaskInventoryItem = {
@@ -15,6 +15,15 @@ const task: OneOfficeProjectTaskInventoryItem = {
 };
 
 describe('parseOneOfficeCommentApiResponse', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('requests the normal-work namespace for normal tasks and preserves their source URL', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ total: 0, items: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+    await fetchOneOfficeCommentsFromPage({ allowedOrigin: window.location.origin, taskId: '89876', offset: 1000, object: 'work-normal-normal' });
+    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get('object')).toBe('work-normal-normal');
+    const normalTask = { ...task, internalId: '89876', url: 'https://office.meygroup.vn/apps/work-normal-normal/view?ID=89876' };
+    expect(parseOneOfficeCommentApiResponse({ total: 0, items: [] }, normalTask)?.entity.url).toBe(normalTask.url);
+  });
   it('normalizes roots, replies, mentions, timestamps, and attachments', () => {
     const result = parseOneOfficeCommentApiResponse(
       {

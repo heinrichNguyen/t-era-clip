@@ -1,4 +1,4 @@
-import { ONEOFFICE_ALLOWED_ORIGIN } from './collectionClient';
+import { oneOfficeOrigin } from './origins';
 import { parseOneOfficeTimestamp } from './timestamp';
 import type {
   OneOfficeAttachment,
@@ -34,6 +34,7 @@ interface OneOfficeCommentApiItem {
 }
 
 export interface OneOfficeCommentApiResponse {
+  requestError?: string;
   items?: OneOfficeCommentApiItem[];
   total?: number;
 }
@@ -42,6 +43,7 @@ export interface OneOfficeCommentApiRequestOptions {
   allowedOrigin: string;
   taskId: string;
   offset: number;
+  object?: 'work-task-task' | 'work-normal-normal';
 }
 
 const chromeApi = typeof globalThis !== 'undefined' ? (globalThis as any).chrome : undefined;
@@ -54,7 +56,8 @@ export async function fetchOneOfficeCommentsFromPage(
   }
 
   const url = new URL('/comment/post/gets', options.allowedOrigin);
-  url.searchParams.set('object', 'work-task-task');
+  if (options.object && options.object !== 'work-task-task' && options.object !== 'work-normal-normal') return null;
+  url.searchParams.set('object', options.object ?? 'work-task-task');
   url.searchParams.set('object_id', options.taskId);
   url.searchParams.set('_offset', String(options.offset));
   url.searchParams.set('_json', '1');
@@ -64,10 +67,14 @@ export async function fetchOneOfficeCommentsFromPage(
   url.searchParams.set('_ajax', '1');
   url.searchParams.set('inlineLogin', '1');
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
   try {
     const response = await fetch(url.href, {
       method: 'GET',
       credentials: 'include',
+      redirect: 'error',
+      signal: controller.signal,
       headers: {
         Accept: 'application/json, text/javascript, */*; q=0.01',
         'X-Requested-With': 'XMLHttpRequest',
@@ -75,12 +82,16 @@ export async function fetchOneOfficeCommentsFromPage(
     });
 
     if (!response.ok) {
-      return null;
+      return { requestError: `Yêu cầu 1Office: HTTP ${response.status}. Hãy kiểm tra phiên đăng nhập và thử lại.` };
     }
 
     return (await response.json()) as OneOfficeCommentApiResponse;
   } catch {
-    return null;
+    return { requestError: controller.signal.aborted
+      ? 'Yêu cầu 1Office: máy chủ không phản hồi trong 30 giây. Hãy thử lại.'
+      : 'Yêu cầu 1Office: lỗi kết nối, dữ liệu trả về hoặc chuyển hướng. Kiểm tra phiên đăng nhập và thử lại.' };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -239,7 +250,9 @@ export function parseOneOfficeCommentApiResponse(
   const comments: OneOfficeComment[] = [];
   const warnings: string[] = [];
   let sourceOrder = 0;
-  const taskUrl = `${ONEOFFICE_ALLOWED_ORIGIN}/apps/work-task-task/view?ID=${encodeURIComponent(task.internalId)}`;
+  const origin = oneOfficeOrigin(task.url);
+  const taskUrl = new URL(task.url).pathname === '/apps/work-normal-normal/view' ? task.url
+    : `${origin}/apps/work-task-task/view?ID=${encodeURIComponent(task.internalId)}`;
 
   const appendComment = (
     item: OneOfficeCommentApiItem,
@@ -319,13 +332,15 @@ export async function collectOneOfficeTaskFromCommentApi(
     func: fetchOneOfficeCommentsFromPage,
     args: [
       {
-        allowedOrigin: ONEOFFICE_ALLOWED_ORIGIN,
+        allowedOrigin: oneOfficeOrigin(task.url),
         taskId: task.internalId,
+        ...(new URL(task.url).pathname === '/apps/work-normal-normal/view' ? { object: 'work-normal-normal' } : {}),
         offset: 1000,
       },
     ],
   });
   const response = injectionResults?.[0]?.result as OneOfficeCommentApiResponse | null | undefined;
+  if (response?.requestError) throw new Error(response.requestError);
 
   return response ? parseOneOfficeCommentApiResponse(response, task) : null;
 }

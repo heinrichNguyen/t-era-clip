@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:discussions": "vite build --config vite.discussions.config.ts --mode discussions",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "preview": "vite preview"
@@ -13,6 +14,7 @@
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "read-excel-file": "9.3.12",
     "write-excel-file": "^4.1.1"
   },
   "devDependencies": {

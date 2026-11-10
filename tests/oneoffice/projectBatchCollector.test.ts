@@ -10,6 +10,14 @@ beforeEach(() => {
 });
 
 describe('readOneOfficeTaskPageState', () => {
+  it('keeps normal-work and project-task discussion namespaces separate', () => {
+    window.history.replaceState({}, '', '/apps/work-normal-normal/view?ID=1001');
+    const options = { allowedOrigin: window.location.origin, taskId: '1001', taskPath: '/apps/work-normal-normal/view' };
+    expect(readOneOfficeTaskPageState(options).ready).toBe(false);
+    document.body.innerHTML = '<div class="cards comments" comments-id="work-normal-normal@1001"><div class="cards-body"></div></div>';
+    expect(readOneOfficeTaskPageState(options).ready).toBe(true);
+    expect(readOneOfficeTaskPageState({ ...options, taskPath: undefined }).ready).toBe(false);
+  });
   it('accepts the full task page when the matching discussion is visible', () => {
     expect(
       readOneOfficeTaskPageState({

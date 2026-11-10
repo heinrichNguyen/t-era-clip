@@ -68,53 +68,57 @@ const formatMentions = (comment: OneOfficeComment): string =>
 const formatAttachmentNames = (comment: OneOfficeComment): string =>
   comment.attachments.map((attachment) => attachment.name).join('\n');
 
+const formatBoolean = (value: boolean): string => (value ? 'Có' : 'Không');
+const formatEntityType = (value: OneOfficeDiscussionExport['entity']['type']): string =>
+  value === 'project' ? 'Dự án' : 'Công việc';
+
 const createEntitySheet = (result: OneOfficeDiscussionExport): SheetData => {
   const comments = [...result.comments].sort(
     (first, second) => first.sourceOrder - second.sourceOrder,
   );
   const rows: Array<[string, string | number | boolean]> = [
-    ['Entity type', result.entity.type],
-    ['Internal ID', result.entity.internalId],
-    ['Business code', result.entity.code ?? ''],
-    ['Name', result.entity.name],
-    ['Source URL', result.entity.url],
-    ['Captured at', result.capturedAt],
-    ['Collection complete', result.collection.complete],
-    ['Expected root comments', result.collection.expectedRootCommentCount ?? 'Unknown'],
-    ['Loaded root comments', result.collection.loadedRootCommentCount],
-    ['Loaded replies', result.collection.loadedReplyCount],
-    ['Total discussion entries', comments.length],
-    ['Attachments', countAttachments(comments)],
-    ['Load-more actions', result.collection.loadMoreClicks],
-    ['Warnings', result.collection.warnings.join('\n')],
+    ['Loại đối tượng', formatEntityType(result.entity.type)],
+    ['ID nội bộ', result.entity.internalId],
+    ['Mã công việc/dự án', result.entity.code ?? ''],
+    ['Tên công việc/dự án', result.entity.name],
+    ['Đường dẫn nguồn', result.entity.url],
+    ['Thời điểm thu thập', result.capturedAt],
+    ['Thu thập đầy đủ', formatBoolean(result.collection.complete)],
+    ['Số bình luận gốc dự kiến', result.collection.expectedRootCommentCount ?? 'Không xác định'],
+    ['Bình luận gốc đã tải', result.collection.loadedRootCommentCount],
+    ['Phản hồi đã tải', result.collection.loadedReplyCount],
+    ['Tổng số nội dung thảo luận', comments.length],
+    ['Tệp đính kèm', countAttachments(comments)],
+    ['Số lần tải thêm', result.collection.loadMoreClicks],
+    ['Cảnh báo', result.collection.warnings.join('\n')],
   ];
 
   return [
-    [headerCell('Field'), headerCell('Value')],
+    [headerCell('Trường thông tin'), headerCell('Giá trị')],
     ...rows.map(([label, value]) => [labelCell(label), dataCell(value)]),
   ];
 };
 
 const createDiscussionSheet = (result: OneOfficeDiscussionExport): SheetData => {
   const headers = [
-    'Source order',
-    'Entry type',
-    'Comment ID',
-    'Parent comment ID',
-    'Root comment ID',
-    'Depth',
-    'Author',
-    'Author ID',
-    'Comment time',
-    'Comment time ISO',
-    'Comment content',
-    'Mentions',
-    'Attachment count',
-    'Attachment names',
-    'Entity type',
-    'Task / Project ID',
-    'Task / Project code',
-    'Task / Project name',
+    'STT',
+    'Loại thảo luận',
+    'ID bình luận',
+    'ID bình luận cha',
+    'ID bình luận gốc',
+    'Cấp phản hồi',
+    'Người bình luận',
+    'ID người bình luận',
+    'Thời gian bình luận',
+    'Thời gian ISO',
+    'Nội dung bình luận',
+    'Người được nhắc đến',
+    'Số tệp đính kèm',
+    'Tên tệp đính kèm',
+    'Loại đối tượng',
+    'ID công việc/dự án',
+    'Mã công việc/dự án',
+    'Tên công việc/dự án',
   ];
   const comments = [...result.comments].sort(
     (first, second) => first.sourceOrder - second.sourceOrder,
@@ -124,7 +128,7 @@ const createDiscussionSheet = (result: OneOfficeDiscussionExport): SheetData => 
     headers.map(headerCell),
     ...comments.map((comment) => [
       dataCell(comment.sourceOrder + 1),
-      dataCell(comment.parentId ? 'Reply' : 'Root comment'),
+      dataCell(comment.parentId ? 'Phản hồi' : 'Bình luận gốc'),
       textCell(comment.id),
       textCell(comment.parentId ?? ''),
       textCell(comment.rootId),
@@ -140,7 +144,7 @@ const createDiscussionSheet = (result: OneOfficeDiscussionExport): SheetData => 
       dataCell(formatMentions(comment)),
       dataCell(comment.attachments.length),
       dataCell(formatAttachmentNames(comment)),
-      dataCell(result.entity.type),
+      dataCell(formatEntityType(result.entity.type)),
       textCell(result.entity.internalId),
       textCell(result.entity.code ?? ''),
       dataCell(result.entity.name),
@@ -153,7 +157,7 @@ const createAttachmentRow = (
   comment: OneOfficeComment,
   attachment: OneOfficeAttachment,
 ) => [
-  dataCell(result.entity.type),
+  dataCell(formatEntityType(result.entity.type)),
   textCell(result.entity.internalId),
   textCell(result.entity.code ?? ''),
   dataCell(result.entity.name),
@@ -164,25 +168,25 @@ const createAttachmentRow = (
   dataCell(attachment.index + 1),
   dataCell(attachment.name),
   dataCell(attachment.sizeText ?? ''),
-  dataCell(attachment.originalDownloadAvailable),
+  dataCell(formatBoolean(attachment.originalDownloadAvailable)),
   dataCell(attachment.thumbnailUrl ?? ''),
 ];
 
 const createAttachmentsSheet = (result: OneOfficeDiscussionExport): SheetData => {
   const headers = [
-    'Entity type',
-    'Task / Project ID',
-    'Task / Project code',
-    'Task / Project name',
-    'Comment ID',
-    'Parent comment ID',
-    'Author',
-    'Comment time',
-    'Attachment index',
-    'Attachment name',
-    'Attachment size',
-    'Original download available',
-    'Thumbnail URL',
+    'Loại đối tượng',
+    'ID công việc/dự án',
+    'Mã công việc/dự án',
+    'Tên công việc/dự án',
+    'ID bình luận',
+    'ID bình luận cha',
+    'Người bình luận',
+    'Thời gian bình luận',
+    'STT tệp',
+    'Tên tệp',
+    'Dung lượng tệp',
+    'Có thể tải file gốc',
+    'URL ảnh xem trước',
   ];
   const rows = [...result.comments]
     .sort((first, second) => first.sourceOrder - second.sourceOrder)
@@ -208,14 +212,14 @@ export function buildOneOfficeWorkbook(result: OneOfficeDiscussionExport): Sheet
   return [
     {
       data: createEntitySheet(result),
-      sheet: 'Entity',
+      sheet: 'Đối tượng',
       columns: [{ width: 28 }, { width: 80 }],
       stickyRowsCount: 1,
       showGridLines: false,
     },
     {
       data: createDiscussionSheet(result),
-      sheet: 'Discussion',
+      sheet: 'Thảo luận',
       columns: [
         { width: 12 },
         { width: 16 },
@@ -243,7 +247,7 @@ export function buildOneOfficeWorkbook(result: OneOfficeDiscussionExport): Sheet
     },
     {
       data: createAttachmentsSheet(result),
-      sheet: 'Attachments',
+      sheet: 'Tệp đính kèm',
       columns: [
         { width: 14 },
         { width: 20 },
